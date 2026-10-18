@@ -130,6 +130,7 @@ fun StonicAiOrb(
                 AssistantState.LISTENING -> 1.0f + (dynamicSoundAnim.value * 0.28f)
                 AssistantState.THINKING -> 1.0f + (glowAlpha * 0.10f)
                 AssistantState.SPEAKING -> speakingWave
+                AssistantState.ERROR -> 1.0f + (glowAlpha * 0.05f)
             }
 
             val currentRadius = baseRadius * effectiveScale
@@ -140,6 +141,7 @@ fun StonicAiOrb(
                 AssistantState.LISTENING -> StonicCyan.copy(alpha = 0.35f + (dynamicSoundAnim.value * 0.3f))
                 AssistantState.THINKING -> StonicPurple.copy(alpha = 0.40f * glowAlpha)
                 AssistantState.SPEAKING -> StonicHotPinkGlow.copy(alpha = 0.45f)
+                AssistantState.ERROR -> Color(0xFFFF3366).copy(alpha = 0.50f * glowAlpha)
             }
 
             drawCircle(
@@ -285,6 +287,13 @@ fun StonicAiOrb(
                     StonicHotPinkGlow,
                     StonicNeonPink,
                     Color(0xFF4A0E32),
+                    Color(0xFF09090D)
+                )
+                AssistantState.ERROR -> listOf(
+                    Color.White,
+                    Color(0xFFFF3366),
+                    Color(0xFFFF0055),
+                    Color(0xFF4A0014),
                     Color(0xFF09090D)
                 )
             }

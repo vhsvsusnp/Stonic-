@@ -20,6 +20,9 @@ class SettingsRepository(context: Context) {
         private const val KEY_SELECTED_VOICE = "selected_voice"
         private const val KEY_AUTO_SPEAK = "auto_speak"
         private const val KEY_MUTE_VOICE = "mute_voice"
+        private const val KEY_WAKE_WORD_ENABLED = "wake_word_enabled"
+        private const val KEY_BACKGROUND_LISTENING = "background_listening"
+        private const val KEY_HANDS_FREE_CONVERSATION = "hands_free_conversation"
     }
 
     // --- API Key Management ---
@@ -114,6 +117,31 @@ class SettingsRepository(context: Context) {
 
     fun setVoiceMuted(muted: Boolean) {
         prefs.edit().putBoolean(KEY_MUTE_VOICE, muted).apply()
+    }
+
+    // --- Wake Word & Hands-Free Conversation ---
+    fun isWakeWordEnabled(): Boolean {
+        return prefs.getBoolean(KEY_WAKE_WORD_ENABLED, true)
+    }
+
+    fun setWakeWordEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_WAKE_WORD_ENABLED, enabled).apply()
+    }
+
+    fun isBackgroundListeningEnabled(): Boolean {
+        return prefs.getBoolean(KEY_BACKGROUND_LISTENING, false)
+    }
+
+    fun setBackgroundListeningEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_BACKGROUND_LISTENING, enabled).apply()
+    }
+
+    fun isHandsFreeEnabled(): Boolean {
+        return prefs.getBoolean(KEY_HANDS_FREE_CONVERSATION, true)
+    }
+
+    fun setHandsFreeEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_HANDS_FREE_CONVERSATION, enabled).apply()
     }
 
     // Flow for observing preference changes

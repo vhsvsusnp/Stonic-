@@ -121,6 +121,10 @@ fun HomeScreen(
             assistantState == AssistantState.SPEAKING -> {
                 viewModel.stopSpeaking()
             }
+            assistantState == AssistantState.ERROR -> {
+                viewModel.dismissMessages()
+                viewModel.startListening()
+            }
             ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.RECORD_AUDIO
@@ -285,14 +289,16 @@ fun HomeScreen(
             // Subtitle state feedback
             Text(
                 text = when (assistantState) {
-                    AssistantState.IDLE -> "Tap orb or mic to speak with Stonic"
-                    AssistantState.LISTENING -> "Listening... speak now"
+                    AssistantState.IDLE -> "Say \"Stonic\" or tap the glowing orb to speak"
+                    AssistantState.LISTENING -> "Listening... speak your command, Sir"
                     AssistantState.THINKING -> "Synthesizing response with Gemini..."
                     AssistantState.SPEAKING -> "Tap orb to interrupt speech"
+                    AssistantState.ERROR -> "Transmission error • Tap orb to retry"
                 },
                 color = when (assistantState) {
                     AssistantState.LISTENING -> StonicCyan
                     AssistantState.THINKING -> StonicNeonPink
+                    AssistantState.ERROR -> Color(0xFFFF5370)
                     else -> StonicTextMuted
                 },
                 fontSize = 12.sp,

@@ -25,7 +25,7 @@ abstract class StonicDatabase : RoomDatabase() {
                     StonicDatabase::class.java,
                     "stonic_ai_database"
                 )
-                    .fallbackToDestructiveMigration()
+                    .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                 INSTANCE = instance
                 instance

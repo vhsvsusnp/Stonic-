@@ -10,6 +10,8 @@ import com.example.util.JarvisActionExecutor
 import com.example.util.JarvisResult
 import com.example.voice.AssistantState
 import com.example.voice.AvailableVoice
+import com.example.voice.StonicWakeWordService
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +34,10 @@ data class StonicUiState(
     val isMuted: Boolean = false,
     val autoSpeak: Boolean = true,
     val effectiveKeyConfigured: Boolean = false,
-    val customApiKeyInput: String = ""
+    val customApiKeyInput: String = "",
+    val wakeWordEnabled: Boolean = true,
+    val backgroundListening: Boolean = false,
+    val handsFreeConversation: Boolean = true
 )
 
 class StonicViewModel(application: Application) : AndroidViewModel(application) {
@@ -60,8 +65,22 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
     val soundLevel: StateFlow<Float> = voiceManager.soundWaveLevel
     val availableVoices: StateFlow<List<AvailableVoice>> = voiceManager.availableVoices
 
+    private var shouldContinueConversation = true
+
     init {
         loadSettings()
+
+        // Hook voice manager callback for hands-free continuous conversation
+        voiceManager.onSpeakingFinishedCallback = {
+            if (_uiState.value.handsFreeConversation && !_uiState.value.isMuted && shouldContinueConversation) {
+                viewModelScope.launch {
+                    delay(600)
+                    if (voiceManager.assistantState.value == AssistantState.IDLE) {
+                        startListening()
+                    }
+                }
+            }
+        }
     }
 
     private fun loadSettings() {
@@ -74,17 +93,93 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
             ttsPitch = settings.getTtsPitch(),
             selectedVoiceId = settings.getSelectedVoice(),
             isMuted = settings.isVoiceMuted(),
-            autoSpeak = settings.isAutoSpeakEnabled()
+            autoSpeak = settings.isAutoSpeakEnabled(),
+            wakeWordEnabled = settings.isWakeWordEnabled(),
+            backgroundListening = settings.isBackgroundListeningEnabled(),
+            handsFreeConversation = settings.isHandsFreeEnabled()
         )
     }
 
+    private fun isExitPhrase(phrase: String): Boolean {
+        val l = phrase.lowercase().trim()
+        return l in listOf(
+            "goodbye", "good bye", "bye", "stop", "cancel", "exit", "quit",
+            "band ho jao", "chup ho jao", "thank you", "thanks", "shukriya"
+        )
+    }
+
+    private fun extractWakeWordAndCommand(input: String): Pair<Boolean, String> {
+        val lower = input.lowercase().trim()
+        val wakeWords = listOf(
+            "hey stonic", "hello stonic", "hi stonic", "ok stonic", "aey stonic", "suno stonic", "stonic"
+        )
+        for (w in wakeWords) {
+            if (lower == w) {
+                return Pair(true, "")
+            }
+            if (lower.startsWith("$w ") || lower.startsWith("$w,") || lower.startsWith("$w:")) {
+                val command = input.substring(w.length).trim().removePrefix(",").removePrefix(":").trim()
+                return Pair(true, command)
+            }
+        }
+        return Pair(false, input)
+    }
+
     fun submitQuery(query: String, isVoice: Boolean = false) {
-        val cleanQuery = query.trim()
-        if (cleanQuery.isBlank()) return
+        val rawQuery = query.trim()
+        if (rawQuery.isBlank()) return
+
+        // Check for exit phrase to end hands-free loop
+        if (isExitPhrase(rawQuery)) {
+            shouldContinueConversation = false
+            voiceManager.stopListening()
+            val ack = "Standing by, Sir. Have a productive day."
+            _uiState.value = _uiState.value.copy(
+                latestPrompt = rawQuery,
+                latestResponse = ack,
+                isProcessing = false
+            )
+            viewModelScope.launch {
+                dao.insertMessage(ChatMessageEntity(role = "user", content = rawQuery, isVoice = isVoice))
+                dao.insertMessage(ChatMessageEntity(role = "model", content = ack))
+            }
+            if (_uiState.value.autoSpeak && !_uiState.value.isMuted) {
+                voiceManager.speak(ack, _uiState.value.ttsSpeed, _uiState.value.ttsPitch)
+            }
+            return
+        }
+
+        shouldContinueConversation = true
+
+        // Extract wake word
+        val (wakeWordDetected, extractedCommand) = extractWakeWordAndCommand(rawQuery)
+
+        // If user only said the wake word ("Stonic" / "Hey Stonic")
+        if (wakeWordDetected && extractedCommand.isBlank()) {
+            val reply = "Yes Sir, I am listening. How can I assist you?"
+            _uiState.value = _uiState.value.copy(
+                latestPrompt = rawQuery,
+                latestResponse = reply,
+                isProcessing = false
+            )
+            viewModelScope.launch {
+                dao.insertMessage(ChatMessageEntity(role = "user", content = rawQuery, isVoice = isVoice))
+                dao.insertMessage(ChatMessageEntity(role = "model", content = reply))
+            }
+            if (_uiState.value.autoSpeak && !_uiState.value.isMuted) {
+                voiceManager.speak(reply, _uiState.value.ttsSpeed, _uiState.value.ttsPitch)
+            } else {
+                startListening()
+            }
+            return
+        }
+
+        // Clean command without wake-word prefix
+        val cleanCommand = if (wakeWordDetected && extractedCommand.isNotBlank()) extractedCommand else rawQuery
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
-                latestPrompt = cleanQuery,
+                latestPrompt = cleanCommand,
                 isProcessing = true,
                 errorMessage = null,
                 successMessage = null
@@ -96,17 +191,16 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
             dao.insertMessage(
                 ChatMessageEntity(
                     role = "user",
-                    content = cleanQuery,
+                    content = cleanCommand,
                     isVoice = isVoice,
                     language = _uiState.value.preferredLanguage
                 )
             )
 
             // 2. Check for local device Jarvis actions first
-            val actionResult = actionExecutor.tryExecuteAction(cleanQuery)
+            val actionResult = actionExecutor.tryExecuteAction(cleanCommand)
             when (actionResult) {
                 is JarvisResult.Executed -> {
-                    // Handled locally (Clock, Alarm, Timer, App, Note, Calculator, Web Search)
                     dao.insertMessage(
                         ChatMessageEntity(
                             role = "model",
@@ -136,7 +230,7 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
                     // 3. Send to Gemini 3.5 Flash API
                     val recentTurns = dao.getRecentMessagesList(6).reversed()
                     val result = geminiClient.generateReply(
-                        prompt = cleanQuery,
+                        prompt = cleanCommand,
                         recentHistory = recentTurns,
                         languageOverride = _uiState.value.preferredLanguage
                     )
@@ -171,9 +265,8 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
                             isProcessing = false,
                             errorMessage = errText
                         )
-                        voiceManager.setIdleState()
+                        voiceManager.setErrorState()
 
-                        // Record error turn
                         dao.insertMessage(
                             ChatMessageEntity(
                                 role = "model",
@@ -189,6 +282,7 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun startListening() {
+        shouldContinueConversation = true
         voiceManager.startListening(
             preferredLanguage = _uiState.value.preferredLanguage,
             onResult = { recognizedText ->
@@ -201,10 +295,12 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun stopListening() {
+        shouldContinueConversation = false
         voiceManager.stopListening()
     }
 
     fun stopSpeaking() {
+        shouldContinueConversation = false
         voiceManager.stopSpeaking()
     }
 
@@ -229,6 +325,32 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
     fun setAutoSpeak(enabled: Boolean) {
         settings.setAutoSpeakEnabled(enabled)
         _uiState.value = _uiState.value.copy(autoSpeak = enabled)
+    }
+
+    fun setWakeWordEnabled(enabled: Boolean) {
+        settings.setWakeWordEnabled(enabled)
+        _uiState.value = _uiState.value.copy(wakeWordEnabled = enabled)
+        if (!enabled && _uiState.value.backgroundListening) {
+            toggleBackgroundListening(false)
+        }
+    }
+
+    fun toggleBackgroundListening(enabled: Boolean) {
+        settings.setBackgroundListeningEnabled(enabled)
+        _uiState.value = _uiState.value.copy(backgroundListening = enabled)
+        if (enabled) {
+            StonicWakeWordService.startService(app)
+        } else {
+            StonicWakeWordService.stopService(app)
+        }
+    }
+
+    fun setHandsFreeConversation(enabled: Boolean) {
+        settings.setHandsFreeEnabled(enabled)
+        _uiState.value = _uiState.value.copy(handsFreeConversation = enabled)
+        if (!enabled) {
+            shouldContinueConversation = false
+        }
     }
 
     fun setLanguage(lang: String) {
@@ -265,7 +387,7 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
         }
         _uiState.value = _uiState.value.copy(
             effectiveKeyConfigured = settings.hasValidApiKey(),
-            successMessage = "API Key saved successfully."
+            successMessage = "API Key saved successfully, Sir."
         )
     }
 
@@ -274,7 +396,7 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = _uiState.value.copy(
             customApiKeyInput = "",
             effectiveKeyConfigured = settings.hasValidApiKey(),
-            successMessage = "Custom API Key cleared."
+            successMessage = "Custom API Key cleared, Sir."
         )
     }
 
@@ -284,7 +406,7 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         if (keyToTest.isBlank()) {
-            _uiState.value = _uiState.value.copy(errorMessage = "Please enter an API key to test.")
+            _uiState.value = _uiState.value.copy(errorMessage = "Please enter an API key to test, Sir.")
             return
         }
 
@@ -313,8 +435,8 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             dao.clearAllMessages()
             _uiState.value = _uiState.value.copy(
-                latestResponse = "Conversation history cleared.",
-                successMessage = "Chat history cleared."
+                latestResponse = "Conversation history cleared, Sir.",
+                successMessage = "Chat history cleared, Sir."
             )
         }
     }
@@ -338,7 +460,7 @@ class StonicViewModel(application: Application) : AndroidViewModel(application) 
                     tag = "Assistant Note"
                 )
             )
-            _uiState.value = _uiState.value.copy(successMessage = "Note saved.")
+            _uiState.value = _uiState.value.copy(successMessage = "Note saved, Sir.")
         }
     }
 

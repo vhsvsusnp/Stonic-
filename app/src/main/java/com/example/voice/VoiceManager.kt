@@ -18,7 +18,8 @@ enum class AssistantState {
     IDLE,
     LISTENING,
     THINKING,
-    SPEAKING
+    SPEAKING,
+    ERROR
 }
 
 data class AvailableVoice(
@@ -49,6 +50,7 @@ class VoiceManager(private val context: Context) : TextToSpeech.OnInitListener {
 
     private var onSpeechResultCallback: ((String) -> Unit)? = null
     private var onSpeechErrorCallback: ((String) -> Unit)? = null
+    var onSpeakingFinishedCallback: (() -> Unit)? = null
 
     init {
         tts = TextToSpeech(context.applicationContext, this)
@@ -65,6 +67,7 @@ class VoiceManager(private val context: Context) : TextToSpeech.OnInitListener {
                 override fun onDone(utteranceId: String?) {
                     _assistantState.value = AssistantState.IDLE
                     _soundWaveLevel.value = 0f
+                    onSpeakingFinishedCallback?.invoke()
                 }
 
                 @Deprecated("Deprecated in Java")
@@ -124,7 +127,6 @@ class VoiceManager(private val context: Context) : TextToSpeech.OnInitListener {
         if (!isTtsInitialized) return
         try {
             val voices = tts?.voices ?: return
-            // Look for male voice in English first or current system language
             val maleVoice = voices.firstOrNull { voice ->
                 val n = voice.name.lowercase(Locale.ROOT)
                 n.contains("male") || n.contains("#male") || n.contains("en-us-x-sfg") || n.contains("en-gb-x-rjs")
@@ -133,7 +135,6 @@ class VoiceManager(private val context: Context) : TextToSpeech.OnInitListener {
             if (maleVoice != null) {
                 tts?.voice = maleVoice
             } else {
-                // Fall back to default English voice
                 tts?.language = Locale.ENGLISH
             }
         } catch (_: Exception) {
@@ -164,9 +165,9 @@ class VoiceManager(private val context: Context) : TextToSpeech.OnInitListener {
         if (!isTtsInitialized || text.isBlank()) return
 
         stopSpeaking()
+        stopListening() // Prevent microphone from listening to Stonic's own voice
 
         tts?.setSpeechRate(speechRate.coerceIn(0.5f, 2.0f))
-        // Pitch slightly below 1.0 gives a deeper, more masculine Jarvis-like tone
         tts?.setPitch(speechPitch.coerceIn(0.5f, 1.5f))
 
         val utteranceId = "stonic_utterance_${System.currentTimeMillis()}"
@@ -174,12 +175,11 @@ class VoiceManager(private val context: Context) : TextToSpeech.OnInitListener {
             putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
         }
 
-        // Clean up markdown syntax for natural voice reading
         val cleanText = text
-            .replace(Regex("\\*\\*(.*?)\\*\\*"), "$1") // Bold
-            .replace(Regex("\\*(.*?)\\*"), "$1")     // Italic
-            .replace(Regex("`([^`]+)`"), "$1")       // Code
-            .replace(Regex("#+\\s*"), "")            // Headers
+            .replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
+            .replace(Regex("\\*(.*?)\\*"), "$1")
+            .replace(Regex("`([^`]+)`"), "$1")
+            .replace(Regex("#+\\s*"), "")
             .trim()
 
         _assistantState.value = AssistantState.SPEAKING
@@ -205,6 +205,11 @@ class VoiceManager(private val context: Context) : TextToSpeech.OnInitListener {
         _soundWaveLevel.value = 0f
     }
 
+    fun setErrorState() {
+        _assistantState.value = AssistantState.ERROR
+        _soundWaveLevel.value = 0f
+    }
+
     // --- Speech Recognition ---
     fun startListening(
         preferredLanguage: String,
@@ -213,6 +218,11 @@ class VoiceManager(private val context: Context) : TextToSpeech.OnInitListener {
     ) {
         if (!isSpeechRecognitionAvailable) {
             onError("Speech recognition service is not available on this device. Please use text input.")
+            return
+        }
+
+        // Echo protection: Never start listening while speaking
+        if (_assistantState.value == AssistantState.SPEAKING) {
             return
         }
 
@@ -234,7 +244,6 @@ class VoiceManager(private val context: Context) : TextToSpeech.OnInitListener {
                     }
 
                     override fun onRmsChanged(rmsdB: Float) {
-                        // Normalize RMS dB (usually -2 to 10) into 0f..1f range for visualizer
                         val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
                         _soundWaveLevel.value = normalized
                     }
@@ -255,7 +264,7 @@ class VoiceManager(private val context: Context) : TextToSpeech.OnInitListener {
                             SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission required"
                             SpeechRecognizer.ERROR_NETWORK -> "Network error during speech recognition"
                             SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected. Please speak again."
+                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected"
                             SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognizer is busy"
                             SpeechRecognizer.ERROR_SERVER -> "Server error"
                             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected"

@@ -105,6 +105,7 @@ fun StonicStatusChip(
         AssistantState.LISTENING -> Pair("LISTENING TO VOICE...", StonicCyan)
         AssistantState.THINKING -> Pair("ANALYZING WITH GEMINI...", StonicPurple)
         AssistantState.SPEAKING -> Pair("STONIC SPEAKING...", StonicNeonPink)
+        AssistantState.ERROR -> Pair("SYSTEM ALERT • TAP TO RETRY", Color(0xFFFF5370))
     }
 
     Surface(
