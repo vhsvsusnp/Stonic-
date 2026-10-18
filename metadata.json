@@ -1,0 +1,6 @@
+{
+  "name": "Stonic AI",
+  "description": "Futuristic AI Assistant with glowing interactive orb, voice interactions, Gemini AI, and smart device tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

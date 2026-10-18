@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Stonic AI</string>
+    <string name="tagline">Your Personal AI Assistant</string>
+    <string name="action_chat">AI Chat</string>
+    <string name="action_voice">Voice Orb</string>
+    <string name="action_notes">Saved Notes</string>
+    <string name="action_settings">Settings</string>
+    <string name="mic_listening">Listening to voice...</string>
+    <string name="mic_idle">Tap orb or mic to speak</string>
+    <string name="ai_thinking">Processing intelligence...</string>
+    <string name="ai_speaking">Speaking response...</string>
+    <string name="prompt_placeholder">Ask Stonic anything...</string>
+</resources>
